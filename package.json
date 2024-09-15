@@ -1,0 +1,59 @@
+{
+  "name": "preciser",
+  "displayName": "Preciser-Covert Methods To Expression Body",
+  "description": "This extension will convert methods to expression body",
+  "publisher": "your-publisher-name",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:javascript"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "typescript",
+        "aliases": [
+          "TypeScript",
+          "ts"
+        ],
+        "extensions": [
+          ".ts"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "codeActions": [
+      {
+        "languages": [
+          "typescript"
+        ],
+        "actions": {
+          "kind": "refactor",
+          "title": "Convert to expression",
+          "description": "Convert method to expression-bodied method"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^14.14.37",
+    "@types/vscode": "^1.60.0",
+    "typescript": "^4.2.3",
+    "eslint": "^7.22.0",
+    "vscode-test": "^1.4.0"
+  }
+}
