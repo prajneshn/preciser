@@ -8,7 +8,7 @@
 
 -Converting a block body method to an expression body.
 
-![Method to Expression Body](https://github.com/your-repo/preciser/blob/main/images/usage.gif)
+![Method to Expression Body](https://github.com/prajneshn/preciser/blob/master/images/usage.gif?raw=true)
 
 ## Features
 
