@@ -8,8 +8,9 @@ function hasMultipleStatements(body: string): boolean {
   return /\n/.test(body) && !/^[^\{\}\n]*$/.test(body);
 }
 
-function usesThis(body: string): boolean {
-  return /this\./.test(body);
+function isObjectLiteral(body: string): boolean {
+  // Check if the body starts with '{' and ends with '}' and contains key-value pairs
+  return /^\{\s*[\w\s:'",]+\s*\}$/.test(body);
 }
 
 function provideCodeActions(
@@ -51,15 +52,16 @@ function provideCodeActions(
       return new vscode.Position(endLine, document.lineAt(endLine).text.length);
     }
     const selectedText = document.getText(new vscode.Range(start, end));
+    console.log("selectedText", selectedText);
 
     const methodRegex =
-      /(?<!\b(?:function|async|export|default)\s+)((?:(?:public|private|protected|static|abstract|async|get|set|readonly|override)\s*)*)(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*?)\}/s;
+      /(?<!\b(?:function|export|default)\s+)((?:(?:public|private|protected|static|abstract|async|get|set|readonly|override)\s+)*)(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*?)\}/s;
 
     const functionRegex =
-      /(?:(async|export|default)\s+)*function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*?)\}(?!\s*=>)/g;
+      /(?:(async|export|default)\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*\{([\s\S]*?)\}(?!\s*=>)/g;
 
     const arrowFunctionRegex =
-      /((?:public|private|protected|static|abstract|async|readonly|override)\s+)?(const|let|var)?\s+(\w+)\s*=\s*\(([^)]*)\)\s*(?::\s*([\w<>[\]]+))?\s*=>\s*{([\s\S]*?)}/;
+      /((?:public|private|protected|static|abstract|readonly|override)\s+)?(const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>\s*{([\s\S]*?)}/;
 
     const lifecycleHooks = new Set([
       "super",
@@ -98,39 +100,27 @@ function provideCodeActions(
     let declaration;
     let matches: RegExpExecArray | null;
     let expressionBody;
+    let asyncKeyword;
     if ((matches = functionRegex.exec(selectedText))) {
-      // console.log("functionRegex", matches);
+      console.log("functionRegex");
       declaration = matches[1];
-
       functionName = matches[2];
       functionParameters = matches[3];
       const returnType = matches[4];
       functionBody = matches[5].trim();
-      console.log("function regex");
-      //console.log("selectedText", selectedText);
-      console.log("functionName", functionName);
-      console.log("functionBody", functionBody);
-      console.log("declaration", declaration);
-      // if (isNestedFunction(selectedText, functionName)) {
-      //   return [];
-      // }
-      // console.log(
-      //   "isNestedFunction",
-      //   isNestedFunction(selectedText, functionName)
-      // );
-      console.log("functionBody", functionBody);
-      console.log("functionName", functionName);
-      console.log("selectedText", selectedText);
-      //console.log(isNestedFunction(selectedText, functionName));
-      if (declaration && /(async|export|default)/.test(declaration)) {
+      if (declaration && declaration.includes("async")) {
+        asyncKeyword = "async";
+      }
+      if (declaration && /(export|default)/.test(declaration)) {
         return [];
       } else {
         declaration = "const ";
       }
-      console.log("check started");
+      console.log("skip check beforer");
       if (shouldSkipConversion(functionName, functionBody)) {
         return [];
       }
+      console.log("skip check after");
       console.log("check ended");
       if (functionBody.startsWith("return ")) {
         functionBody = functionBody.replace(/^return\s*/, "").trim();
@@ -140,9 +130,11 @@ function provideCodeActions(
         functionBody,
         declaration,
         functionParameters,
-        returnType
+        returnType,
+        asyncKeyword
       );
     } else if ((matches = methodRegex.exec(selectedText))) {
+      console.log("methodRegex", matches);
       if (selectedText.includes("=>")) {
         return [];
       }
@@ -151,12 +143,17 @@ function provideCodeActions(
       if (declaration.includes("get") || declaration.includes("set")) {
         return [];
       }
+      console.log("declaration", declaration);
       functionName = matches[2];
       functionParameters = matches[3];
       const returnType = matches[4];
       functionBody = matches[5].trim();
       if (declaration === undefined) {
         declaration = "";
+      }
+      if (declaration.includes("async")) {
+        declaration = declaration.replace("async ", "");
+        asyncKeyword = "async";
       }
       if (shouldSkipConversion(functionName, functionBody)) {
         return [];
@@ -169,7 +166,8 @@ function provideCodeActions(
         functionBody,
         declaration,
         functionParameters,
-        returnType
+        returnType,
+        asyncKeyword
       );
     } else if ((matches = arrowFunctionRegex.exec(selectedText))) {
       console.log("arrowFunctionRegex", matches);
@@ -214,9 +212,22 @@ function provideCodeActions(
       functionBody: string,
       declaration: string,
       parameters: string,
-      returnType?: string
+      returnType?: string,
+      asyncKeyword?: string
     ) {
-      return `${declaration}${functionName} = (${parameters})${
+      console.log("functionBody", functionBody);
+      console.log("functionName", functionName);
+      console.log("parameters", parameters);
+      console.log("returnType", returnType);
+      console.log("declaration", declaration);
+
+      if (isObjectLiteral(functionBody)) {
+        functionBody = `(${functionBody})`;
+      }
+
+      return `${declaration}${functionName} = ${
+        asyncKeyword ? asyncKeyword : ""
+      }(${parameters})${
         returnType ? `:${returnType}` : ""
       } => ${functionBody};`;
     }
