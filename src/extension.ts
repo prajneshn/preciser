@@ -8,9 +8,27 @@ function hasMultipleStatements(body: string): boolean {
   return /\n/.test(body) && !/^[^\{\}\n]*$/.test(body);
 }
 
+const babelParser = require("@babel/parser");
+
 function isObjectLiteral(body: string): boolean {
-  // Check if the body starts with '{' and ends with '}' and contains key-value pairs
-  return /^\{\s*[\w\s:'",]+\s*\}$/.test(body);
+  try {
+    // Parse the input string as JavaScript or TypeScript
+    const ast = babelParser.parse(`(${body})`, {
+      sourceType: "module",
+      plugins: [
+        "jsx", // For handling JSX syntax (if required)
+        "typescript", // For handling TypeScript syntax
+      ],
+    });
+
+    // Check if the body is an object expression
+    return (
+      ast.program.body.length === 1 &&
+      ast.program.body[0].expression.type === "ObjectExpression"
+    );
+  } catch (error) {
+    return false; // If parsing fails, it's not valid
+  }
 }
 
 function provideCodeActions(
@@ -53,15 +71,15 @@ function provideCodeActions(
     }
     const selectedText = document.getText(new vscode.Range(start, end));
     console.log("selectedText", selectedText);
-
+    let methodConvertible = false;
     const methodRegex =
-      /(?<!\b(?:function|export|default)\s+)((?:(?:public|private|protected|static|abstract|async|get|set|readonly|override)\s+)*)(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*?)\}/s;
+      /(?<!\b(?:function|export|default)\s+)((?:(?:public|private|protected|static|abstract|async|get|set|readonly|override)\s*)*)(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*?)\}/s;
 
     const functionRegex =
       /(?:(async|export|default)\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*\{([\s\S]*?)\}(?!\s*=>)/g;
 
     const arrowFunctionRegex =
-      /((?:public|private|protected|static|abstract|readonly|override)\s+)?(const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>\s*{([\s\S]*?)}/;
+      /((public|private|protected|static|abstract|readonly|override)\s+)?(const|let|var)?\s*(async\s+)?(\w+)\s*=\s*(async\s+)?\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*=>\s*(\{[^]*?\}|[^;]+?);?/;
 
     const lifecycleHooks = new Set([
       "super",
@@ -85,10 +103,21 @@ function provideCodeActions(
           braceStack.push("{");
         }
       }
-
-      if (braceStack.length > 1) {
+      console.log();
+      if (
+        braceStack.length > 1 &&
+        !/\breturn\s+([\s\S]*?);\s*(?:\}|\n)/.test(selectedText)
+      ) {
+        console.log("inside");
         return [];
         // Apply your existing logic for top-level functions here
+      }
+
+      if (
+        braceStack.length > 1 &&
+        /\breturn\s+([\s\S]*?);\s*(?:\}|\n)/.test(selectedText)
+      ) {
+        methodConvertible = true;
       }
 
       // Process each character in the line
@@ -135,7 +164,7 @@ function provideCodeActions(
       );
     } else if ((matches = methodRegex.exec(selectedText))) {
       console.log("methodRegex", matches);
-      if (selectedText.includes("=>")) {
+      if (selectedText.includes("=>") && !methodConvertible) {
         return [];
       }
 
@@ -155,12 +184,14 @@ function provideCodeActions(
         declaration = declaration.replace("async ", "");
         asyncKeyword = "async";
       }
+      console.log(functionName, functionBody);
       if (shouldSkipConversion(functionName, functionBody)) {
         return [];
       }
       if (functionBody.startsWith("return ")) {
         functionBody = functionBody.replace(/^return\s*/, "").trim();
       }
+      console.log("functionBody", functionBody);
       expressionBody = updatedExpressionBodyForMethodOrFunction(
         functionName,
         functionBody,
@@ -172,34 +203,55 @@ function provideCodeActions(
     } else if ((matches = arrowFunctionRegex.exec(selectedText))) {
       console.log("arrowFunctionRegex", matches);
       const acesSpecifier = matches[1];
-      const keyword = matches[2];
-      console.log("declaration", declaration);
-      if (acesSpecifier && keyword) {
-        declaration = acesSpecifier + " " + keyword + " ";
+      const variableDeclaration = matches[3];
+      if (acesSpecifier && variableDeclaration) {
+        declaration = acesSpecifier + " " + variableDeclaration + " ";
       } else if (acesSpecifier) {
-        declaration = acesSpecifier + " ";
-      } else if (keyword) {
-        declaration = keyword + " ";
+        declaration = acesSpecifier;
+      } else if (variableDeclaration) {
+        declaration = variableDeclaration + " ";
       } else {
         declaration = "";
       }
-      functionName = matches[3];
-      functionParameters = matches[4];
-      const returnType = matches[5];
-      functionBody = matches[6].trim();
-      if (functionBody.startsWith("return ")) {
-        functionBody = functionBody.replace(/^return\s*/, "").trim();
+      const asyncBeforeName = matches[4];
+      functionName = matches[5];
+      const asyncBeforeParameters = matches[6];
+      if (asyncBeforeName || asyncBeforeParameters) {
+        asyncKeyword = "async";
       }
+      functionParameters = matches[7];
+      const returnType = matches[8];
+      functionBody = matches[9].trim();
+      if (methodConvertible) {
+        functionBody = functionBody + "}";
+      }
+      //console.log("functionBody", functionBody);
+      if (functionBody.startsWith("{") && functionBody.endsWith("}")) {
+        functionBody = functionBody.slice(1, -1).trim();
+      }
+
+      if (functionBody.endsWith(";")) {
+        functionBody = functionBody.replace(/;\s*$/, "").trim();
+      }
+
+      console.log("before skip check");
+      console.log("functionbody", functionBody);
       if (shouldSkipConversion(functionName, functionBody)) {
         return [];
       }
+      console.log("after skip check");
       console.log("functionBody", functionBody);
+      if (functionBody.startsWith("return ")) {
+        functionBody = functionBody.replace(/^return\s*/, "").trim();
+      }
+      console.log(declaration, functionName);
       expressionBody = updatedExpressionBodyForMethodOrFunction(
         functionName,
         functionBody,
         declaration,
         functionParameters,
-        returnType
+        returnType,
+        asyncKeyword
       );
       console.log("expressionBody", expressionBody);
     } else {
@@ -220,23 +272,27 @@ function provideCodeActions(
       console.log("parameters", parameters);
       console.log("returnType", returnType);
       console.log("declaration", declaration);
-
+      console.log(isObjectLiteral(functionBody));
       if (isObjectLiteral(functionBody)) {
         functionBody = `(${functionBody})`;
       }
-
+      console.log("functionBody", functionBody);
       return `${declaration}${functionName} = ${
         asyncKeyword ? asyncKeyword : ""
       }(${parameters})${
         returnType ? `:${returnType}` : ""
       } => ${functionBody};`;
     }
-
     function shouldSkipConversion(
       functionName: string,
       functionBody: string
     ): boolean {
-      if (hasMultipleStatements(functionBody) || hasControlFlow(functionBody)) {
+      if (
+        (hasMultipleStatements(functionBody) &&
+          !/\{\s*return\s*\{\s*[^{}]*\s*\}\s*;\s*\}/.test(selectedText)) ||
+        hasControlFlow(functionBody)
+      ) {
+        console.log("inside");
         return true;
       }
       if (lifecycleHooks.has(functionName)) {
@@ -244,6 +300,7 @@ function provideCodeActions(
       }
       return false;
     }
+
     return createCodeAction(expressionBody, start, end);
   } catch (error) {
     return [];
@@ -269,20 +326,22 @@ function provideCodeActions(
 
     action.edit = new vscode.WorkspaceEdit();
 
-    // Get the indentation of the start line
+    //Get the indentation of the start line
     const startLineText = document.lineAt(start.line).text;
     const indentation = startLineText.match(/^\s*/)?.[0] || "";
-
+    // console.log("cleanexpressionbody", cleanExpressionBody);
     // Add indentation to each line of the cleanExpressionBody
     const indentedExpressionBody = cleanExpressionBody
       .split("\n")
       .map((line) => indentation + line)
       .join("\n");
 
+    //console.log("indentedExpressionBody", indentedExpressionBody);
+
     action.edit.replace(
       document.uri,
       new vscode.Range(start, end),
-      indentedExpressionBody
+      cleanExpressionBody
     );
 
     return [action];
