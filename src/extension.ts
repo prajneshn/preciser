@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
 
 function hasControlFlow(body: string): boolean {
-  return /if\s*\(|for\s*\(|while\s*\(|switch\s*\(/.test(body);
+  return /if\s*\(|for\s*\(|while\s*\(|switch\s*\(|else\s*|else\s+if\s*\(|do\s*\{/.test(
+    body
+  );
 }
 
 function hasMultipleStatements(body: string): boolean {
@@ -73,7 +75,7 @@ function provideCodeActions(
     console.log("selectedText", selectedText);
     let methodConvertible = false;
     const methodRegex =
-      /(?<!\b(?:function|export|default)\s+)((?:(?:public|private|protected|static|abstract|async|get|set|readonly|override)\s*)*)(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*?)\}/s;
+      /(?<!\b(?:function|export|default)\s+)((?:(?:public|private|protected|static|abstract|async|get|set|readonly|override)\s+)*)(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*)\}/;
 
     const functionRegex =
       /(?:(async|export|default)\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*\{([\s\S]*?)\}(?!\s*=>)/g;
@@ -289,7 +291,7 @@ function provideCodeActions(
     ): boolean {
       if (
         (hasMultipleStatements(functionBody) &&
-          !/\{\s*return\s*\{\s*[^{}]*\s*\}\s*;\s*\}/.test(selectedText)) ||
+          !/\breturn\s+([\s\S]*?);\s*(?:\}|\n)/.test(selectedText)) ||
         hasControlFlow(functionBody)
       ) {
         console.log("inside");
@@ -341,7 +343,7 @@ function provideCodeActions(
     action.edit.replace(
       document.uri,
       new vscode.Range(start, end),
-      cleanExpressionBody
+      indentedExpressionBody
     );
 
     return [action];
