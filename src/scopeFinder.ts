@@ -3,7 +3,6 @@ export function isWithinClass(
   document: vscode.TextDocument,
   line: number
 ): boolean {
-  console.log("inside class");
   let braceBalance = 0;
   for (let i = line - 1; i >= 0; i--) {
     const lineText = document.lineAt(i).text.trim();

@@ -1,25 +1,9 @@
 import * as vscode from "vscode";
 import { hasSimpleReturnFunctions } from "./simpleReturnFinder";
-import { isObjectLiteral } from "./objectMatcher";
 import { getClassName } from "./classNameExtractor";
 import { isWithinClass } from "./scopeFinder";
-import { shouldSkipConversion } from "./helperFunctions";
-
-function updatedExpressionBodyForMethodOrFunction(
-  functionName: string,
-  functionBody: string,
-  declaration: string,
-  parameters: string,
-  returnType?: string,
-  asyncKeyword?: string
-) {
-  if (isObjectLiteral(functionBody)) {
-    functionBody = `(${functionBody})`;
-  }
-  return `${declaration}${functionName} = ${
-    asyncKeyword ? asyncKeyword : ""
-  }(${parameters})${returnType ? `:${returnType}` : ""} => ${functionBody};`;
-}
+import { findEndPosition, shouldSkipConversion } from "./helperFunctions";
+import { updatedExpressionBodyForMethodOrFunction } from "./expressionBodyCreator";
 
 function provideCodeActions(
   document: vscode.TextDocument,
@@ -28,43 +12,13 @@ function provideCodeActions(
   try {
     const start = new vscode.Position(range.start.line, 0);
     const end = findEndPosition(document, range.start.line);
-    function findEndPosition(
-      document: vscode.TextDocument,
-      startLine: number
-    ): vscode.Position {
-      let endLine = startLine;
-      const braceStack: string[] = [];
-
-      for (let i = startLine; i < document.lineCount; i++) {
-        const lineText = document.lineAt(i).text;
-        for (const char of lineText) {
-          if (char === "{") {
-            braceStack.push("{");
-          } else if (char === "}") {
-            braceStack.pop();
-            if (braceStack.length === 0) {
-              endLine = i;
-              break;
-            }
-          }
-        }
-
-        if (braceStack.length === 0) {
-          break;
-        }
-      }
-
-      return new vscode.Position(endLine, document.lineAt(endLine).text.length);
-    }
     const selectedText = document.getText(new vscode.Range(start, end));
     const isWithinClassDeclaration = isWithinClass(document, start.line);
     let methodConvertible = false;
     const methodRegex =
       /(?<!\b(?:function|export|default)\s+)((?:(?:public|private|protected|static|abstract|async|get|set|readonly|override)\s+)*)(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*)\}/;
-
     const functionRegex =
-      /(?:(async|export|default)\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*\{([\s\S]*?)\}(?!\s*=>)/g;
-
+      /(?:(async|export|default)\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*\{([\s\S]*?)\}(?!\s*=>)/;
     const arrowFunctionRegex =
       /((public|private|protected|static|abstract|readonly|override)\s+)?(const|let|var)?\s*(async\s+)?(\w+)\s*=\s*(async\s+)?\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*=>\s*(\{[^]*?\}|[^;]+?);?/;
 
@@ -79,9 +33,7 @@ function provideCodeActions(
       }
       let className;
       let isSimpleReturn;
-      console.log("selectedtext", selectedText);
       if (isWithinClassDeclaration && selectedText.includes("function")) {
-        console.log("inside function");
         return [];
       }
       if (isWithinClassDeclaration) {
@@ -90,10 +42,7 @@ function provideCodeActions(
       } else {
         isSimpleReturn = hasSimpleReturnFunctions(selectedText);
       }
-      if (!isSimpleReturn) {
-        return [];
-      }
-      if (braceStack.length > 1 && !isSimpleReturn) {
+      if (!isSimpleReturn || (braceStack.length > 1 && !isSimpleReturn)) {
         return [];
       }
       if (braceStack.length > 1 && isSimpleReturn) {
@@ -109,7 +58,6 @@ function provideCodeActions(
     let expressionBody;
     let asyncKeyword;
     if ((matches = functionRegex.exec(selectedText))) {
-      console.log("functionRegex");
       declaration = matches[1];
       functionName = matches[2];
       functionParameters = matches[3];
@@ -118,18 +66,14 @@ function provideCodeActions(
       if (declaration && declaration.includes("async")) {
         asyncKeyword = "async";
       }
-      if (declaration && /(export|default)/.test(declaration)) {
+      if (
+        (declaration && /(export|default)/.test(declaration)) ||
+        shouldSkipConversion(functionName, functionBody)
+      ) {
         return [];
       } else {
         declaration = "const ";
       }
-      console.log("before check");
-      console.log("functionBody", functionBody);
-      // console.log("simplecheck", hasSimpleReturnFunctions(selectedText));
-      if (shouldSkipConversion(functionName, functionBody)) {
-        return [];
-      }
-      console.log("after check");
       if (functionBody.startsWith("return ")) {
         functionBody = functionBody.replace(/^return\s*/, "").trim();
       }
@@ -147,13 +91,18 @@ function provideCodeActions(
       }
 
       declaration = matches[1];
-      if (declaration.includes("get") || declaration.includes("set")) {
-        return [];
-      }
       functionName = matches[2];
+      functionBody = matches[5].trim();
       functionParameters = matches[3];
       const returnType = matches[4];
-      functionBody = matches[5].trim();
+      if (
+        declaration.includes("get") ||
+        declaration.includes("set") ||
+        shouldSkipConversion(functionName, functionBody)
+      ) {
+        return [];
+      }
+
       if (declaration === undefined) {
         declaration = "";
       }
@@ -161,13 +110,10 @@ function provideCodeActions(
         declaration = declaration.replace("async ", "");
         asyncKeyword = "async";
       }
-      if (shouldSkipConversion(functionName, functionBody)) {
-        return [];
-      }
+
       if (functionBody.startsWith("return ")) {
         functionBody = functionBody.replace(/^return\s*/, "").trim();
       }
-      console.log("functionBody", functionBody);
       expressionBody = updatedExpressionBodyForMethodOrFunction(
         functionName,
         functionBody,
@@ -214,7 +160,7 @@ function provideCodeActions(
       if (functionBody.startsWith("return ")) {
         functionBody = functionBody.replace(/^return\s*/, "").trim();
       }
-      console.log(declaration, functionName);
+
       expressionBody = updatedExpressionBodyForMethodOrFunction(
         functionName,
         functionBody,

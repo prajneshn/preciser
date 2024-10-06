@@ -18,7 +18,6 @@ export function hasSimpleReturnFunctions(
   function isSimpleFunction(node: ts.Node): boolean {
     if (ts.isBlock(node)) {
       const statements = node.statements;
-      // Check if there's exactly one statement
       return statements.length === 1;
     }
     return false;
@@ -43,9 +42,4 @@ export function hasSimpleReturnFunctions(
 
   findSimpleReturnFunctions(sourceFile);
   return hasSimpleReturn;
-}
-
-// Example usage
-function innerFunction() {
-  console.log("I'm an inner function");
 }
