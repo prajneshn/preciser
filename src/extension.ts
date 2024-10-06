@@ -1,14 +1,24 @@
 import * as vscode from "vscode";
 import { hasSimpleReturnFunctions } from "./simpleReturnFinder";
+import { isObjectLiteral } from "./objectMatcher";
+import { getClassName } from "./classNameExtractor";
+import { isWithinClass } from "./scopeFinder";
+import { shouldSkipConversion } from "./helperFunctions";
 
-function hasControlFlow(body: string): boolean {
-  return /if\s*\(|for\s*\(|while\s*\(|switch\s*\(|else\s*|else\s+if\s*\(|do\s*\{/.test(
-    body
-  );
-}
-
-function hasMultipleStatements(body: string): boolean {
-  return /\n/.test(body) && !/^[^\{\}\n]*$/.test(body);
+function updatedExpressionBodyForMethodOrFunction(
+  functionName: string,
+  functionBody: string,
+  declaration: string,
+  parameters: string,
+  returnType?: string,
+  asyncKeyword?: string
+) {
+  if (isObjectLiteral(functionBody)) {
+    functionBody = `(${functionBody})`;
+  }
+  return `${declaration}${functionName} = ${
+    asyncKeyword ? asyncKeyword : ""
+  }(${parameters})${returnType ? `:${returnType}` : ""} => ${functionBody};`;
 }
 
 function provideCodeActions(
@@ -47,7 +57,7 @@ function provideCodeActions(
       return new vscode.Position(endLine, document.lineAt(endLine).text.length);
     }
     const selectedText = document.getText(new vscode.Range(start, end));
-    console.log("selectedText", selectedText);
+    const isWithinClassDeclaration = isWithinClass(document, start.line);
     let methodConvertible = false;
     const methodRegex =
       /(?<!\b(?:function|export|default)\s+)((?:(?:public|private|protected|static|abstract|async|get|set|readonly|override)\s+)*)(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*)\}/;
@@ -58,17 +68,6 @@ function provideCodeActions(
     const arrowFunctionRegex =
       /((public|private|protected|static|abstract|readonly|override)\s+)?(const|let|var)?\s*(async\s+)?(\w+)\s*=\s*(async\s+)?\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*=>\s*(\{[^]*?\}|[^;]+?);?/;
 
-    const lifecycleHooks = new Set([
-      "super",
-      "constructor",
-      "ngOnInit",
-      "ngOnDestroy",
-      "ngAfterViewInit",
-      "componentDidMount",
-      "componentWillUnmount",
-      "shouldComponentUpdate",
-    ]);
-
     const braceStack: string[] = [];
     const lines = selectedText.split("\n");
     for (let i = 0; i < lines.length; i++) {
@@ -78,7 +77,22 @@ function provideCodeActions(
           braceStack.push("{");
         }
       }
-      var isSimpleReturn = hasSimpleReturnFunctions(selectedText);
+      let className;
+      let isSimpleReturn;
+      console.log("selectedtext", selectedText);
+      if (isWithinClassDeclaration && selectedText.includes("function")) {
+        console.log("inside function");
+        return [];
+      }
+      if (isWithinClassDeclaration) {
+        className = getClassName(document, start.line);
+        isSimpleReturn = hasSimpleReturnFunctions(selectedText, className!);
+      } else {
+        isSimpleReturn = hasSimpleReturnFunctions(selectedText);
+      }
+      if (!isSimpleReturn) {
+        return [];
+      }
       if (braceStack.length > 1 && !isSimpleReturn) {
         return [];
       }
@@ -95,6 +109,7 @@ function provideCodeActions(
     let expressionBody;
     let asyncKeyword;
     if ((matches = functionRegex.exec(selectedText))) {
+      console.log("functionRegex");
       declaration = matches[1];
       functionName = matches[2];
       functionParameters = matches[3];
@@ -108,9 +123,13 @@ function provideCodeActions(
       } else {
         declaration = "const ";
       }
+      console.log("before check");
+      console.log("functionBody", functionBody);
+      // console.log("simplecheck", hasSimpleReturnFunctions(selectedText));
       if (shouldSkipConversion(functionName, functionBody)) {
         return [];
       }
+      console.log("after check");
       if (functionBody.startsWith("return ")) {
         functionBody = functionBody.replace(/^return\s*/, "").trim();
       }
@@ -142,7 +161,6 @@ function provideCodeActions(
         declaration = declaration.replace("async ", "");
         asyncKeyword = "async";
       }
-      console.log(functionName, functionBody);
       if (shouldSkipConversion(functionName, functionBody)) {
         return [];
       }
@@ -189,6 +207,7 @@ function provideCodeActions(
       if (functionBody.endsWith(";")) {
         functionBody = functionBody.replace(/;\s*$/, "").trim();
       }
+
       if (shouldSkipConversion(functionName, functionBody)) {
         return [];
       }
@@ -207,40 +226,6 @@ function provideCodeActions(
     } else {
       return [];
     }
-
-    function updatedExpressionBodyForMethodOrFunction(
-      functionName: string,
-      functionBody: string,
-      declaration: string,
-      parameters: string,
-      returnType?: string,
-      asyncKeyword?: string
-    ) {
-      if (isObjectLiteral(functionBody)) {
-        functionBody = `(${functionBody})`;
-      }
-      return `${declaration}${functionName} = ${
-        asyncKeyword ? asyncKeyword : ""
-      }(${parameters})${
-        returnType ? `:${returnType}` : ""
-      } => ${functionBody};`;
-    }
-    function shouldSkipConversion(
-      functionName: string,
-      functionBody: string
-    ): boolean {
-      if (
-        (hasMultipleStatements(functionBody) && !isSimpleReturn) ||
-        hasControlFlow(functionBody)
-      ) {
-        return true;
-      }
-      if (lifecycleHooks.has(functionName)) {
-        return true;
-      }
-      return false;
-    }
-
     return createCodeAction(expressionBody, start, end);
   } catch (error) {
     return [];

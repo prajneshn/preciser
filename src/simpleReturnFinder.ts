@@ -1,59 +1,51 @@
 import * as ts from "typescript";
 
-export function hasSimpleReturnFunctions(code: string): boolean {
+export function hasSimpleReturnFunctions(
+  code: string,
+  className?: string
+): boolean {
+  var trimmedCode = code.replace(/^[ \t]+|[ \t]+$/gm, "");
+  if (className) {
+    trimmedCode = "class " + className + "{" + trimmedCode + "}";
+  }
   const sourceFile = ts.createSourceFile(
-    "example.ts", // Arbitrary file name for parsing
-    code, // Your code input
-    ts.ScriptTarget.Latest, // Script target (latest TypeScript version)
-    true // Set to true to create an immutable files
+    "example.ts",
+    trimmedCode,
+    ts.ScriptTarget.Latest,
+    true
   );
 
-  // Function to check if a node contains only a return statement
-  function isSimpleReturnFunction(node: any): boolean {
-    let returnCount = 0;
-    let containsOtherCode = false;
-
-    // Traverse the function body and inspect its statements
-    function traverse(node: ts.Node): void {
-      if (ts.isReturnStatement(node)) {
-        returnCount++;
-      } else if (ts.isBlock(node)) {
-        // Ensure that the block contains only one return statement
-        const statements = node.statements;
-        if (statements.length !== 1 || !ts.isReturnStatement(statements[0])) {
-          containsOtherCode = true;
-        }
-      } else if (
-        ts.isExpressionStatement(node) ||
-        ts.isVariableStatement(node) ||
-        ts.isIfStatement(node) ||
-        ts.isForStatement(node) ||
-        ts.isWhileStatement(node) // Exclude other control statements
-      ) {
-        containsOtherCode = true;
-      }
-
-      ts.forEachChild(node, traverse);
+  function isSimpleFunction(node: ts.Node): boolean {
+    if (ts.isBlock(node)) {
+      const statements = node.statements;
+      // Check if there's exactly one statement
+      return statements.length === 1;
     }
-
-    traverse(node);
-    return returnCount === 1 && !containsOtherCode;
+    return false;
   }
 
-  // Function to traverse the AST and find functions/methods with a simple return
-  let hasSimpleReturn = false; // Flag to track if any simple return functions are found
+  let hasSimpleReturn = false;
 
-  function findSimpleReturnFunctions(node: any): void {
-    if (ts.isFunctionLike(node) && isSimpleReturnFunction(node)) {
-      hasSimpleReturn = true; // Set the flag if a simple return function is found
+  function findSimpleReturnFunctions(node: ts.Node): void {
+    if (
+      ts.isMethodDeclaration(node) ||
+      ts.isFunctionDeclaration(node) ||
+      ts.isArrowFunction(node) ||
+      ts.isFunctionExpression(node)
+    ) {
+      if (node.body && isSimpleFunction(node.body)) {
+        hasSimpleReturn = true;
+      }
     }
 
-    // Traverse child nodes
     ts.forEachChild(node, findSimpleReturnFunctions);
   }
 
-  // Start the AST traversal
   findSimpleReturnFunctions(sourceFile);
+  return hasSimpleReturn;
+}
 
-  return hasSimpleReturn; // Return true or false
+// Example usage
+function innerFunction() {
+  console.log("I'm an inner function");
 }
