@@ -34,3 +34,10 @@
    - `Ctrl + .` (Windows/Linux) or `Cmd + .` (Mac).
 3. Choose the **Convert to Expression Body** option from the code actions menu to convert the selected block body function to an expression body.
 4. Alternatively, right-click the selected code and choose **Convert to Expression Body** from the context menu.
+
+## Note
+
+- I tried to cover all possible cases. So if you find any bugs or problems, please let me know.
+- This extension is still in its early stages, and I'm open to feedback and suggestions for improvement
+- If you have any questions or need help, feel free to ask.
+- I'll be happy to help you with any issues or questions you may have.
