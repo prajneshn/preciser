@@ -1,22 +1,25 @@
-import * as vscode from "vscode";
-
 const lifecycleHooks = new Set([
   "super",
   "constructor",
   "ngOnInit",
   "ngOnDestroy",
   "ngAfterViewInit",
+  "ngAfterViewChecked",
+  "ngAfterContentInit",
+  "ngAfterContentChecked",
+  "ngDoCheck",
   "componentDidMount",
   "componentWillUnmount",
   "shouldComponentUpdate",
+  "componentDidUpdate",
+  "componentWillReceiveProps",
+  "render",
 ]);
-
 function hasControlFlow(body: string): boolean {
   return /if\s*\(|for\s*\(|while\s*\(|switch\s*\(|else\s*|else\s+if\s*\(|do\s*\{/.test(
     body
   );
 }
-
 export function shouldSkipConversion(
   functionName: string,
   functionBody: string
@@ -29,32 +32,23 @@ export function shouldSkipConversion(
   }
   return false;
 }
-
-export function findEndPosition(
-  document: vscode.TextDocument,
-  startLine: number
-): vscode.Position {
-  let endLine = startLine;
-  const braceStack: string[] = [];
-
-  for (let i = startLine; i < document.lineCount; i++) {
-    const lineText = document.lineAt(i).text;
-    for (const char of lineText) {
-      if (char === "{") {
-        braceStack.push("{");
-      } else if (char === "}") {
-        braceStack.pop();
-        if (braceStack.length === 0) {
-          endLine = i;
-          break;
-        }
-      }
-    }
-
-    if (braceStack.length === 0) {
-      break;
-    }
-  }
-
-  return new vscode.Position(endLine, document.lineAt(endLine).text.length);
+export function mapParameters(
+  functionParameters: {
+    name: string;
+    type: string | null;
+    defaultValue: string | null;
+  }[]
+) {
+  return functionParameters
+    .map(
+      (param: {
+        name: string;
+        type: string | null;
+        defaultValue: string | null;
+      }) =>
+        `${param.name}${param.type ? `: ${param.type}` : ""}${
+          param.defaultValue ? ` = ${param.defaultValue}` : ""
+        }`
+    )
+    .join(", ");
 }

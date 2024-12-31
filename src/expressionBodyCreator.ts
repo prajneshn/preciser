@@ -8,10 +8,17 @@ export function updatedExpressionBodyForMethodOrFunction(
   returnType?: string,
   asyncKeyword?: string
 ) {
+  if (functionBody.startsWith("return ")) {
+    functionBody = functionBody.replace(/^return\s*/, "").trim();
+  }
+  if (functionBody.endsWith(";")) {
+    functionBody = functionBody.replace(/;\s*$/, "").trim();
+  }
+  functionBody = functionBody.replace(/\s+/g, " ").trim();
   if (isObjectLiteral(functionBody)) {
     functionBody = `(${functionBody})`;
   }
-  return `${declaration}${functionName} = ${
-    asyncKeyword ? asyncKeyword : ""
-  }(${parameters})${returnType ? `:${returnType}` : ""} => ${functionBody};`;
+  const asyncPart = asyncKeyword ? `${asyncKeyword} ` : "";
+  const returnTypePart = returnType ? `: ${returnType}` : "";
+  return `${declaration}${functionName} = ${asyncPart}(${parameters})${returnTypePart} => ${functionBody};`;
 }

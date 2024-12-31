@@ -2,26 +2,32 @@ import * as vscode from "vscode";
 import { hasSimpleReturnFunctions } from "./simpleReturnFinder";
 import { getClassName } from "./classNameExtractor";
 import { isWithinClass } from "./scopeFinder";
-import { findEndPosition, shouldSkipConversion } from "./helperFunctions";
+import { mapParameters, shouldSkipConversion } from "./helperFunctions";
 import { updatedExpressionBodyForMethodOrFunction } from "./expressionBodyCreator";
+import {
+  containsArrowFunction,
+  containsFunctionDeclaration,
+  extractFunctionDetails,
+  isNestedFunction,
+} from "./functionMatcher";
+import { extractArrowFunctionDetailsAdvanced } from "./arrowFunctionMatcher";
+import { findEndPosition } from "./findEndPosition";
+import {
+  containsClassMethod,
+  extractClassMethodDetails,
+} from "./classMethodMatcher";
 
 function provideCodeActions(
   document: vscode.TextDocument,
   range: vscode.Range
 ): vscode.CodeAction[] {
   try {
+    let selectedTextWithClass;
+    let textForArrowFunction: string | undefined;
     const start = new vscode.Position(range.start.line, 0);
     const end = findEndPosition(document, range.start.line);
     const selectedText = document.getText(new vscode.Range(start, end));
     const isWithinClassDeclaration = isWithinClass(document, start.line);
-    let methodConvertible = false;
-    const methodRegex =
-      /(?<!\b(?:function|export|default)\s+)((?:(?:public|private|protected|static|abstract|async|get|set|readonly|override)\s+)*)(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]*))?\s*\{([\s\S]*)\}/;
-    const functionRegex =
-      /(?:(async|export|default)\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*\{([\s\S]*?)\}(?!\s*=>)/;
-    const arrowFunctionRegex =
-      /((public|private|protected|static|abstract|readonly|override)\s+)?(const|let|var)?\s*(async\s+)?(\w+)\s*=\s*(async\s+)?\(([^)]*)\)\s*(?::\s*([\w<>\[\]]+))?\s*=>\s*(\{[^]*?\}|[^;]+?);?/;
-
     const braceStack: string[] = [];
     const lines = selectedText.split("\n");
     for (let i = 0; i < lines.length; i++) {
@@ -33,39 +39,68 @@ function provideCodeActions(
       }
       let className;
       let isSimpleReturn;
-      if (isWithinClassDeclaration && selectedText.includes("function")) {
+      if (isWithinClassDeclaration && selectedText.includes("const")) {
         return [];
       }
+      if (isWithinClassDeclaration && selectedText.includes("var")) {
+        return [];
+      }
+      if (isWithinClassDeclaration && selectedText.includes("let")) {
+        return [];
+      }
+      if (selectedText.includes("catch") || selectedText.includes("try")) {
+        return [];
+      }
+
       if (isWithinClassDeclaration) {
         className = getClassName(document, start.line);
         isSimpleReturn = hasSimpleReturnFunctions(selectedText, className!);
+        selectedTextWithClass = selectedText.replace(/^[ \t]+|[ \t]+$/gm, "");
+        selectedTextWithClass =
+          "class " + className + "{" + selectedTextWithClass + "}";
+        textForArrowFunction = selectedTextWithClass;
       } else {
         isSimpleReturn = hasSimpleReturnFunctions(selectedText);
+        textForArrowFunction = selectedText;
       }
       if (!isSimpleReturn || (braceStack.length > 1 && !isSimpleReturn)) {
         return [];
-      }
-      if (braceStack.length > 1 && isSimpleReturn) {
-        methodConvertible = true;
       }
     }
 
     let functionName;
     let functionBody;
-    let functionParameters;
+    let functionParameters = "";
     let declaration;
-    let matches: RegExpExecArray | null;
     let expressionBody;
     let asyncKeyword;
-    if ((matches = functionRegex.exec(selectedText))) {
-      declaration = matches[1];
-      functionName = matches[2];
-      functionParameters = matches[3];
-      const returnType = matches[4];
-      functionBody = matches[5].trim();
+    if (
+      (!isWithinClass || selectedText.includes("function ")) &&
+      containsFunctionDeclaration(selectedText)
+    ) {
+      const functionDetails = extractFunctionDetails(selectedText);
+
+      functionName = functionDetails.functionName;
+      if (
+        functionName === null ||
+        isNestedFunction(selectedText, functionName)
+      ) {
+        return [];
+      }
+
+      declaration = functionDetails.declaration;
+      if (
+        selectedText.includes("export ") ||
+        selectedText.includes("default ")
+      ) {
+        return [];
+      }
       if (declaration && declaration.includes("async")) {
         asyncKeyword = "async";
       }
+      const returnType = functionDetails.returnType ?? undefined;
+      functionBody = functionDetails.functionBody;
+      functionParameters = mapParameters(functionDetails.functionParameters);
       if (
         (declaration && /(export|default)/.test(declaration)) ||
         shouldSkipConversion(functionName, functionBody)
@@ -73,9 +108,6 @@ function provideCodeActions(
         return [];
       } else {
         declaration = "const ";
-      }
-      if (functionBody.startsWith("return ")) {
-        functionBody = functionBody.replace(/^return\s*/, "").trim();
       }
       expressionBody = updatedExpressionBodyForMethodOrFunction(
         functionName,
@@ -85,21 +117,27 @@ function provideCodeActions(
         returnType,
         asyncKeyword
       );
-    } else if ((matches = methodRegex.exec(selectedText))) {
-      if (selectedText.includes("=>") && !methodConvertible) {
+    } else if (containsClassMethod(selectedTextWithClass)) {
+      var classMethodDetails = extractClassMethodDetails(selectedTextWithClass);
+      if (classMethodDetails === null) {
         return [];
       }
 
-      declaration = matches[1];
-      functionName = matches[2];
-      functionBody = matches[5].trim();
-      functionParameters = matches[3];
-      const returnType = matches[4];
-      if (
-        declaration.includes("get") ||
-        declaration.includes("set") ||
-        shouldSkipConversion(functionName, functionBody)
-      ) {
+      declaration =
+        (classMethodDetails.accessSpecifier
+          ? classMethodDetails.accessSpecifier + " "
+          : "") +
+        (classMethodDetails.modifiers && classMethodDetails.modifiers.length > 0
+          ? classMethodDetails.modifiers.join(" ") + " "
+          : (declaration ?? "").trim());
+      functionName = classMethodDetails.functionName;
+      if (functionName === "function" || functionName === null) {
+        return [];
+      }
+      functionBody = classMethodDetails.functionBody;
+      functionParameters = mapParameters(classMethodDetails.functionParameters);
+      const returnType = classMethodDetails.returnType ?? undefined;
+      if (shouldSkipConversion(functionName, functionBody)) {
         return [];
       }
 
@@ -122,45 +160,30 @@ function provideCodeActions(
         returnType,
         asyncKeyword
       );
-    } else if ((matches = arrowFunctionRegex.exec(selectedText))) {
-      const acesSpecifier = matches[1];
-      const variableDeclaration = matches[3];
-      if (acesSpecifier && variableDeclaration) {
-        declaration = acesSpecifier + " " + variableDeclaration + " ";
-      } else if (acesSpecifier) {
-        declaration = acesSpecifier;
-      } else if (variableDeclaration) {
-        declaration = variableDeclaration + " ";
-      } else {
-        declaration = "";
+    } else if (containsArrowFunction(textForArrowFunction!)) {
+      var details = extractArrowFunctionDetailsAdvanced(textForArrowFunction!);
+      functionName = details.functionName;
+      if (functionName === null) return [];
+      const variableDeclaration = details.variableKind;
+      declaration =
+        (details.accessSpecifier ? details.accessSpecifier + " " : "") +
+        (details.modifiers && details.modifiers.length > 0
+          ? details.modifiers.join(" ") + " "
+          : (declaration ?? "").trim());
+
+      if (variableDeclaration) {
+        declaration = "const ";
       }
-      const asyncBeforeName = matches[4];
-      functionName = matches[5];
-      const asyncBeforeParameters = matches[6];
-      if (asyncBeforeName || asyncBeforeParameters) {
-        asyncKeyword = "async";
-      }
-      functionParameters = matches[7];
-      const returnType = matches[8];
-      functionBody = matches[9].trim();
-      if (methodConvertible) {
-        functionBody = functionBody + "}";
-      }
-      if (functionBody.startsWith("{") && functionBody.endsWith("}")) {
+
+      const asyncBeforeName = details.modifiers.includes("async");
+      const asyncBeforeParameters = details.modifiers.includes("async");
+      if (asyncBeforeName || asyncBeforeParameters) asyncKeyword = "async";
+      functionParameters = mapParameters(details.functionParameters);
+      const returnType = details.returnType ?? undefined;
+      functionBody = details.functionBody;
+      if (functionBody.startsWith("{") && functionBody.endsWith("}"))
         functionBody = functionBody.slice(1, -1).trim();
-      }
-
-      if (functionBody.endsWith(";")) {
-        functionBody = functionBody.replace(/;\s*$/, "").trim();
-      }
-
-      if (shouldSkipConversion(functionName, functionBody)) {
-        return [];
-      }
-      if (functionBody.startsWith("return ")) {
-        functionBody = functionBody.replace(/^return\s*/, "").trim();
-      }
-
+      if (shouldSkipConversion(functionName, functionBody)) return [];
       expressionBody = updatedExpressionBodyForMethodOrFunction(
         functionName,
         functionBody,

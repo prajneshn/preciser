@@ -18,7 +18,12 @@ export function hasSimpleReturnFunctions(
   function isSimpleFunction(node: ts.Node): boolean {
     if (ts.isBlock(node)) {
       const statements = node.statements;
-      return statements.length === 1;
+      if (statements.length === 1 && ts.isReturnStatement(statements[0])) {
+        return true;
+      }
+      if (statements.length === 1) {
+        return true;
+      }
     }
     return false;
   }
