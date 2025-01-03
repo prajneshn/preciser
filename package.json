@@ -3,11 +3,11 @@
   "displayName": "Preciser-Convert Methods To Expression Body",
   "description": "Preciser automatically refactors your methods into concise expression bodies, streamlining your code for improved readability and maintenance in TypeScript and JavaScript.",
   "publisher": "PrajneshNoochila",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.93.0"
   },
-  "icon": "images/iconF.png",
+  "icon": "images/logof.png",
   "galleryBanner": {
     "color": "#000000",
     "theme": "dark"
